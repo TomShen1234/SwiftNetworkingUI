@@ -68,14 +68,14 @@ The only parameter required by the endpoint is an `URL` to create the `URLReques
 There are several kinds for an endpoint (all as subtypes of `EndpointKinds`):
 
 | Type | HTTP Method | Authentication | Object Encoding |
-| ---- | ----------- | -------------- |
+| -------------- | ----------- | -------------- | ----- |
 | `Public` | `GET` | None | No |
 | `BasicGet` | `GET` | Basic | No |
 | `BearerGet` | `GET` | Bearer | No |
 | `PublicUpload` | `POST` | None | Yes |
 | `Upload` | `POST` | Bearer | Yes |
-| `Edit` | `PUT` | Bearer | Yes |
-| `Delete` | `DELETE` | Bearer | Yes |
+| `Edit`  | `PUT` | Bearer | Yes |
+| `Delete` | `DELETE`  | Bearer | Yes |
 
 It is possible to implement custom endpoint kinds too, simply create a enum that conforms to `EndpointKind` protocol.
 
