@@ -122,7 +122,7 @@ public enum EndpointKinds {
     
     /// Endpoint kind for uploading data via POST to public routes without authentication.
     public enum PublicUpload<Type: Encodable>: EndpointKind {
-        public static func prepare(_ request: inout URLRequest, encoding obj: Type?, with token: String, encoder: JSONEncoder) throws {
+        public static func prepare(_ request: inout URLRequest, encoding obj: Type?, with _: Void, encoder: JSONEncoder) throws {
             if let obj = obj {
                 try JSONEncodeHelper.encode(object: obj, to: &request)
             }
@@ -137,7 +137,7 @@ public enum EndpointKinds {
             // First prepare using bearer authenticator
             BearerAuthenticable.prepare(&request, with: token, encoder: encoder)
             // Then Prepare with public upload to configure post objects
-            try PublicUpload<Type>.prepare(&request, encoding: obj, with: token, encoder: encoder)
+            try PublicUpload<Type>.prepare(&request, encoding: obj, with: (), encoder: encoder)
         }
     }
     
@@ -180,7 +180,7 @@ public struct Endpoint<Kind: EndpointKind, Response: Decodable> {
     /// Path to endpoint
     public var url: URL
     /// Optional custom configurations to the request
-    public var customRequestConfigurator: ((URLRequest) -> URLRequest)?
+    public var customRequestConfigurator: ((inout URLRequest) -> ())?
     /// If necessary, change properties of the JSON Encoder to customize upload behavior.
     ///
     /// **Note**: The default date encoding strategy is set to ISO8601 for compatibility with Vapor's default behavior
@@ -190,7 +190,7 @@ public struct Endpoint<Kind: EndpointKind, Response: Decodable> {
     /// **Note**: The default date decoding strategy is set to ISO8601 for compatibility with Vapor's default behavior
     public var jsonDecoder: JSONDecoder = .init()
     
-    public init(url: URL, customRequestConfigurator: ( (URLRequest) -> URLRequest)? = nil) {
+    public init(url: URL, customRequestConfigurator: ( (inout URLRequest) -> ())? = nil) {
         self.url = url
         self.customRequestConfigurator = customRequestConfigurator
         
@@ -205,7 +205,7 @@ public extension Endpoint {
         var request = URLRequest(url: self.url)
         try Kind.prepare(&request, encoding: obj, with: requestData, encoder: jsonEncoder)
         if let customRequestConfigurator {
-            request = customRequestConfigurator(request)
+            customRequestConfigurator(&request)
         }
         return request
     }
@@ -299,27 +299,27 @@ public extension DataUploader where Kind.RequestObject == StubCodable, Response 
 }
 
 // MARK: - URL Builder
-/// Allows different types to be passed into `URL.build`
-protocol URLPathAllowed {
-    /// Convert the instance to a path component of URL
-    var pathRepresentation: String { get }
-}
-
-extension String: URLPathAllowed {
-    var pathRepresentation: String { self }
-}
-
-extension UUID: URLPathAllowed {
-    var pathRepresentation: String { self.uuidString }
-}
-
-extension URL {
-    /// Build URL using variadic parameters
-    static func build(from base: URL, _ pathComponents: URLPathAllowed...) -> URL {
-        var result = base
-        for component in pathComponents {
-            result = result.appendingPathComponent(component.pathRepresentation)
-        }
-        return result
-    }
-}
+// // Allows different types to be passed into `URL.build`
+//protocol URLPathAllowed {
+//    /// Convert the instance to a path component of URL
+//    var pathRepresentation: String { get }
+//}
+//
+//extension String: URLPathAllowed {
+//    var pathRepresentation: String { self }
+//}
+//
+//extension UUID: URLPathAllowed {
+//    var pathRepresentation: String { self.uuidString }
+//}
+//
+//extension URL {
+//    /// Build URL using variadic parameters
+//    static func build(from base: URL, _ pathComponents: URLPathAllowed...) -> URL {
+//        var result = base
+//        for component in pathComponents {
+//            result = result.appendingPathComponent(component.pathRepresentation)
+//        }
+//        return result
+//    }
+//}
