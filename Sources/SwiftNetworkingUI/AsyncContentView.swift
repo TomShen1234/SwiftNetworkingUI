@@ -113,16 +113,16 @@ public struct AsyncView<Data, Content: View>: View {
 
 // MARK: - Additional Endpoint Based Initializers
 extension AsyncView {
-    public init(downloadFrom request: URLRequest, decodeTo decodeType: Data.Type, decoder: JSONDecoder = .init(), makeContent: @escaping (Data) -> Content) where Data: Decodable {
+    public init(downloadFrom request: URLRequest, decodeTo decodeType: Data.Type, makeContent: @escaping (Data) -> Content) where Data: Decodable {
         let loadClosure = {
-            return try await URLSession.shared.data(for: request, responseType: decodeType.self, decoder: decoder)
+            return try await URLSession.shared.data(for: request, responseType: decodeType.self)
         }
         self.init(makeContent: makeContent, loadClosure: loadClosure)
     }
     
-    public init<K>(downloadFrom endpoint: Endpoint<K, Data>, using data: K.RequestData, decoder: JSONDecoder = .init(), makeContent: @escaping (Data) -> Content) where Data: Decodable, K: EndpointKind {
+    public init<K>(downloadFrom endpoint: Endpoint<K, Data>, using data: K.RequestData, makeContent: @escaping (Data) -> Content) where Data: Decodable, K: EndpointKind {
         let loadClosure = {
-            return try await URLSession.shared.data(for: endpoint, using: data, decoder: decoder)
+            return try await URLSession.shared.data(for: endpoint, using: data)
         }
         self.init(makeContent: makeContent, loadClosure: loadClosure)
     }
@@ -134,8 +134,8 @@ extension AsyncView {
         self.init(makeContent: makeContent, loadClosure: loadClosure)
     }
     
-    public init<K>(downloadFrom endpoint: Endpoint<K, Data>, decoder: JSONDecoder = .init(), makeContent: @escaping (Data) -> Content) where Data: Decodable, K: EndpointKind, K.RequestData == Void {
-        self.init(downloadFrom: endpoint, using: (), decoder: decoder, makeContent: makeContent)
+    public init<K>(downloadFrom endpoint: Endpoint<K, Data>, makeContent: @escaping (Data) -> Content) where Data: Decodable, K: EndpointKind, K.RequestData == Void {
+        self.init(downloadFrom: endpoint, using: (), makeContent: makeContent)
     }
     
     public init<K>(downloadFrom endpoint: Endpoint<K, String>, makeContent: @escaping (String) -> Content) where Data == String, K: EndpointKind, K.RequestData == Void {

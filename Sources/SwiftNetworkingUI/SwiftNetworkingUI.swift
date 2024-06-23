@@ -1,6 +1,4 @@
-import SwiftUI
 import Foundation
-import Combine
 
 // MARK: - URL Session APIs
 extension URLSession {
@@ -31,9 +29,9 @@ extension URLSession {
     /// - parameter obj: Object to encode into the request's body (to use in cases like POST or PUT requests)
     /// - parameter endpointData: Any additional necessary object specifically requested by the provided endpoint.
     /// - parameter decoder: If necessary, provide a custom JSON decoder here.
-    public func data<K, R>(for endpoint: Endpoint<K, R>, encoding obj: K.RequestObject? = nil, using endpointData: K.RequestData, encoder: JSONEncoder = .init(), decoder: JSONDecoder = .init()) async throws -> R {
-        let request = try endpoint.makeRequest(encoding: obj, with: endpointData, encoder: encoder)
-        return try await data(for: request, responseType: R.self, decoder: decoder)
+    public func data<K, R>(for endpoint: Endpoint<K, R>, encoding obj: K.RequestObject? = nil, using endpointData: K.RequestData) async throws -> R {
+        let request = try endpoint.makeRequest(encoding: obj, with: endpointData)
+        return try await data(for: request, responseType: R.self, decoder: endpoint.jsonDecoder)
     }
     
     /// Downloads content of a URL based on the specified endpoint and decodes it into a string.
@@ -41,8 +39,8 @@ extension URLSession {
     /// - parameter endpoint: The endpoint to query data from.
     /// - parameter obj: Object to encode into the request's body (to use in cases like POST or PUT requests)
     /// - parameter endpointData: Any additional necessary object specifically requested by the provided endpoint.
-    public func string<K>(for endpoint: Endpoint<K, String>, encoding obj: K.RequestObject? = nil, using endpointData: K.RequestData, encoder: JSONEncoder = .init()) async throws -> String {
-        let request = try endpoint.makeRequest(encoding: obj, with: endpointData, encoder: encoder)
+    public func string<K>(for endpoint: Endpoint<K, String>, encoding obj: K.RequestObject? = nil, using endpointData: K.RequestData) async throws -> String {
+        let request = try endpoint.makeRequest(encoding: obj, with: endpointData)
         let (data, response) = try await URLSession.shared.data(for: request)
         try HTTPError.assertHTTPStatus(response)
         let result = String(decoding: data, as: UTF8.self)
@@ -54,8 +52,8 @@ extension URLSession {
     /// - parameter endpoint: The endpoint to query data from.
     /// - parameter obj: Object to encode into the request's body (to use in cases like POST or PUT requests)
     /// - parameter endpointData: Any additional necessary object specifically requested by the provided endpoint.
-    public func query<K>(endpoint: Endpoint<K, StubCodable>, encoding obj: K.RequestObject? = nil, using endpointData: K.RequestData, encoder: JSONEncoder = .init()) async throws {
-        let request = try endpoint.makeRequest(encoding: obj, with: endpointData, encoder: encoder)
+    public func query<K>(endpoint: Endpoint<K, StubCodable>, encoding obj: K.RequestObject? = nil, using endpointData: K.RequestData) async throws {
+        let request = try endpoint.makeRequest(encoding: obj, with: endpointData)
         let (_, response) = try await URLSession.shared.data(for: request)
         try HTTPError.assertHTTPStatus(response)
     }
@@ -87,17 +85,20 @@ public protocol EndpointKind {
     static func prepare(_ request: inout URLRequest, encoding obj: RequestObject?, with data: RequestData, encoder: JSONEncoder) throws
 }
 
+/// There are various readily-available endpoint kinds that can be used directly.
+///
+/// If there is a use case outside of the ones provided, implement additional types by creating enums that conforms to `EndpointKind` protocol and implementing the prepare function. 
 public enum EndpointKinds {
-    /// Public endpoint without any access control
+    /// Public endpoint without any access control.
     public enum Public: EndpointKind {
         public static func prepare(_ request: inout URLRequest, encoding _: StubCodable?, with _: Void, encoder: JSONEncoder) {
             request.cachePolicy = .reloadIgnoringLocalCacheData
         }
     }
     
-    /// Endpoints that takes basic authentications
-    enum BasicAuthenticable: EndpointKind {
-        static func prepare(_ request: inout URLRequest, encoding _: StubCodable? = nil, with token: BasicAccessToken, encoder: JSONEncoder) {
+    /// Endpoints that takes basic authentications.
+    public enum BasicAuthenticable: EndpointKind {
+        public static func prepare(_ request: inout URLRequest, encoding _: StubCodable? = nil, with token: BasicAccessToken, encoder: JSONEncoder) {
             let loginString = "\(token.username):\(token.password)"
             let loginData = Data(loginString.utf8)
             let base64LoginString = loginData.base64EncodedString()
@@ -105,26 +106,23 @@ public enum EndpointKinds {
         }
     }
     
-    /// Endpoints that takes basic authentications (see `BasicAuthenticable`)
-    typealias BasicGet = BasicAuthenticable
+    /// Endpoints that takes basic authentications (see `BasicAuthenticable`).
+    public typealias BasicGet = BasicAuthenticable
     
-    /// Endpoints that takes bearer authentications
-    enum BearerAuthenticable: EndpointKind {
-        static func prepare(_ request: inout URLRequest, encoding _: StubCodable? = nil, with token: String, encoder: JSONEncoder) {
+    /// Endpoints that takes bearer authentications.
+    public enum BearerAuthenticable: EndpointKind {
+        public static func prepare(_ request: inout URLRequest, encoding _: StubCodable? = nil, with token: String, encoder: JSONEncoder) {
             let bearerToken = "Bearer \(token)"
             request.setValue(bearerToken, forHTTPHeaderField: "Authorization")
         }
     }
     
     /// Endpoints that takes bearer authentications (see `BearerAuthenticable`)
-    typealias BearerGet = BearerAuthenticable
+    public typealias BearerGet = BearerAuthenticable
     
-    /// Endpoint kind for uploading data, uses bearer authentication
-    enum Upload<Type: Encodable>: EndpointKind {
-        static func prepare(_ request: inout URLRequest, encoding obj: Type?, with token: String, encoder: JSONEncoder) throws {
-            // First prepare using bearer authenticator
-            BearerAuthenticable.prepare(&request, with: token, encoder: encoder)
-            
+    /// Endpoint kind for uploading data via POST to public routes without authentication.
+    public enum PublicUpload<Type: Encodable>: EndpointKind {
+        public static func prepare(_ request: inout URLRequest, encoding obj: Type?, with token: String, encoder: JSONEncoder) throws {
             if let obj = obj {
                 try JSONEncodeHelper.encode(object: obj, to: &request)
             }
@@ -133,8 +131,19 @@ public enum EndpointKinds {
         }
     }
     
-    enum Edit<Type: Encodable>: EndpointKind {
-        static func prepare(_ request: inout URLRequest, encoding obj: Type?, with token: String, encoder: JSONEncoder) throws {
+    /// Endpoint kind for uploading data via POST, uses bearer authentication.
+    public enum Upload<Type: Encodable>: EndpointKind {
+        public static func prepare(_ request: inout URLRequest, encoding obj: Type?, with token: String, encoder: JSONEncoder) throws {
+            // First prepare using bearer authenticator
+            BearerAuthenticable.prepare(&request, with: token, encoder: encoder)
+            // Then Prepare with public upload to configure post objects
+            try PublicUpload<Type>.prepare(&request, encoding: obj, with: token, encoder: encoder)
+        }
+    }
+    
+    /// Endpoint kind for editing data via PUT, uses bearer authentication.
+    public enum Edit<Type: Encodable>: EndpointKind {
+        public static func prepare(_ request: inout URLRequest, encoding obj: Type?, with token: String, encoder: JSONEncoder) throws {
             // Prepare with the upload kind
             try Upload<Type>.prepare(&request, encoding: obj, with: token, encoder: encoder)
             
@@ -142,8 +151,9 @@ public enum EndpointKinds {
         }
     }
     
-    enum Delete<Type: Encodable>: EndpointKind {
-        static func prepare(_ request: inout URLRequest, encoding obj: Type?, with token: String, encoder: JSONEncoder) throws {
+    /// Endpoint kind for deleting data via DELETE, uses bearer authentication.
+    public enum Delete<Type: Encodable>: EndpointKind {
+        public static func prepare(_ request: inout URLRequest, encoding obj: Type?, with token: String, encoder: JSONEncoder) throws {
             // Prepare with the upload kind
             try Upload<Type>.prepare(&request, encoding: obj, with: token, encoder: encoder)
             
@@ -171,18 +181,29 @@ public struct Endpoint<Kind: EndpointKind, Response: Decodable> {
     public var url: URL
     /// Optional custom configurations to the request
     public var customRequestConfigurator: ((URLRequest) -> URLRequest)?
+    /// If necessary, change properties of the JSON Encoder to customize upload behavior.
+    ///
+    /// **Note**: The default date encoding strategy is set to ISO8601 for compatibility with Vapor's default behavior
+    public var jsonEncoder: JSONEncoder = .init()
+    /// If necessary, change properties of the JSON Encoder to customize upload behavior.
+    ///
+    /// **Note**: The default date decoding strategy is set to ISO8601 for compatibility with Vapor's default behavior
+    public var jsonDecoder: JSONDecoder = .init()
     
     public init(url: URL, customRequestConfigurator: ( (URLRequest) -> URLRequest)? = nil) {
         self.url = url
         self.customRequestConfigurator = customRequestConfigurator
+        
+        self.jsonEncoder.dateEncodingStrategy = .iso8601
+        self.jsonDecoder.dateDecodingStrategy = .iso8601
     }
 }
 
 public extension Endpoint {
     /// Create an `URLRequest` for this endpoint
-    func makeRequest(encoding obj: Kind.RequestObject?, with requestData: Kind.RequestData, encoder: JSONEncoder) throws -> URLRequest {
+    func makeRequest(encoding obj: Kind.RequestObject?, with requestData: Kind.RequestData) throws -> URLRequest {
         var request = URLRequest(url: self.url)
-        try Kind.prepare(&request, encoding: obj, with: requestData, encoder: encoder)
+        try Kind.prepare(&request, encoding: obj, with: requestData, encoder: jsonEncoder)
         if let customRequestConfigurator {
             request = customRequestConfigurator(request)
         }
@@ -192,33 +213,22 @@ public extension Endpoint {
 
 // MARK: - Data Uploader
 /// Conform to this protocol to automatically support uploading the object to an specified endpoint.
-protocol DataUploader: Codable {
+///
+/// **Important**: Ensure `Kind.RequestObject` either equals to `Self` or `StubCodable`.
+public protocol DataUploader: Codable {
     associatedtype Kind: EndpointKind
     associatedtype Response: Decodable
     
     var endpoint: Endpoint<Kind, Response> { get }
-    var jsonEncoder: JSONEncoder { get }
-    var jsonDecoder: JSONDecoder { get }
 }
 
-extension DataUploader {
-    // Default Implementation for JSON Encoder and Decoder, without any special options
-    var jsonEncoder: JSONEncoder {
-        JSONEncoder()
-    }
-    
-    var jsonDecoder: JSONDecoder {
-        JSONDecoder()
-    }
-}
-
-extension DataUploader where Kind.RequestObject == Self {
+public extension DataUploader where Kind.RequestObject == Self {
     /// Uploads the data within `self` to the specified URL.
     ///
     /// - parameter requestData: The required piece of data specified by the endpoint kind (`Kind.RequestData`). This is generally used for embedding the authentication. Additional processing to the `URLRequest` can also be done via `customRequestConfigurator` closure on `Endpoint`
     /// - returns: The data returned from the REST API (generally the uploaded object)
     func upload(with requestData: Kind.RequestData) async throws -> Response {
-        return try await URLSession.shared.data(for: endpoint, encoding: self, using: requestData, encoder: jsonEncoder, decoder: jsonDecoder)
+        return try await URLSession.shared.data(for: endpoint, encoding: self, using: requestData)
     }
     
     /// Uploads the data within `self` to the specified URL.
@@ -227,17 +237,17 @@ extension DataUploader where Kind.RequestObject == Self {
     ///
     /// - returns: The data returned from the REST API (generally the uploaded object)
     func upload() async throws -> Response where Kind.RequestData == Void {
-        return try await URLSession.shared.data(for: endpoint, encoding: self, using: (), encoder: jsonEncoder, decoder: jsonDecoder)
+        return try await URLSession.shared.data(for: endpoint, encoding: self, using: ())
     }
 }
 
-extension DataUploader where Kind.RequestObject == StubCodable {
+public extension DataUploader where Kind.RequestObject == StubCodable {
     /// Querys the specified URL without uploading anything.
     ///
     /// - parameter requestData: The required piece of data specified by the endpoint kind (`Kind.RequestData`). This is generally used for embedding the authentication. Additional processing to the `URLRequest` can also be done via `customRequestConfigurator` closure on `Endpoint`
     /// - returns: The data returned from the REST API (generally the uploaded object)
     func upload(with requestData: Kind.RequestData) async throws -> Response {
-        return try await URLSession.shared.data(for: endpoint, using: requestData, decoder: jsonDecoder)
+        return try await URLSession.shared.data(for: endpoint, using: requestData)
     }
     
     /// Querys the specified URL without uploading anything.
@@ -246,17 +256,17 @@ extension DataUploader where Kind.RequestObject == StubCodable {
     ///
     /// - returns: The data returned from the REST API (generally the uploaded object)
     func upload() async throws -> Response where Kind.RequestData == Void {
-        return try await URLSession.shared.data(for: endpoint, using: (), decoder: jsonDecoder)
+        return try await URLSession.shared.data(for: endpoint, using: ())
     }
 }
 
-extension DataUploader where Kind.RequestObject == Self, Response == StubCodable {
+public extension DataUploader where Kind.RequestObject == Self, Response == StubCodable {
     /// Uploads the data within `self` to the specified URL.
     ///
     /// - parameter requestData: The required piece of data specified by the endpoint kind (`Kind.RequestData`). This is generally used for embedding the authentication. Additional processing to the `URLRequest` can also be done via `customRequestConfigurator` closure on `Endpoint`
     /// - returns: Since the response type for this data uploader is `StubCodable`, there is no return value.
     func upload(with requestData: Kind.RequestData) async throws {
-        try await URLSession.shared.query(endpoint: endpoint, encoding: self, using: requestData, encoder: jsonEncoder)
+        try await URLSession.shared.query(endpoint: endpoint, encoding: self, using: requestData)
     }
     
     /// Uploads the data within `self` to the specified URL.
@@ -265,11 +275,11 @@ extension DataUploader where Kind.RequestObject == Self, Response == StubCodable
     ///
     /// - returns: Since the response type for this data uploader is `StubCodable`, there is no return value.
     func upload() async throws where Kind.RequestData == Void {
-        try await URLSession.shared.query(endpoint: endpoint, encoding: self, using: (), encoder: jsonEncoder)
+        try await URLSession.shared.query(endpoint: endpoint, encoding: self, using: ())
     }
 }
 
-extension DataUploader where Kind.RequestObject == StubCodable, Response == StubCodable {
+public extension DataUploader where Kind.RequestObject == StubCodable, Response == StubCodable {
     /// Querys the specified URL without uploading anything.
     ///
     /// - parameter requestData: The required piece of data specified by the endpoint kind (`Kind.RequestData`). This is generally used for embedding the authentication. Additional processing to the `URLRequest` can also be done via `customRequestConfigurator` closure on `Endpoint`
